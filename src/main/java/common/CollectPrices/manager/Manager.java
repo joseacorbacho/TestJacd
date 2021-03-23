@@ -46,6 +46,9 @@ public class Manager implements ManagerInterface {
 	@Value("${mkv.pubSub.sender.credentialsFile}") String credentialsFile;
 	@Value("${Manager.timeWindowLength:300000}") // 5 min
 	private long timeWindowLength;
+	@Value("${Manager.sleepCycleMs:600000}") // 10 min
+	private long SLEEP_CYCLE_MS;
+
 	
 	@Value("#{'${mkv.providers}'.split(',')}") List<String> providers;
 
@@ -469,8 +472,6 @@ public class Manager implements ManagerInterface {
 	private class ShowVwapThread implements Runnable {
 
 		private boolean start = false;
-
-		private long SLEEP_CYCLE_MS = 600000;//every 600 seconds
 
 		public ShowVwapThread() {
 			this.start = true;
