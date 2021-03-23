@@ -38,7 +38,7 @@ public class PubSubMessagePublisher implements QueuePublisher {
 	@Override public boolean send(String message, QueueConfiguration configuration, long timestamp) {
 		configuration = configuration instanceof PubSubConfiguration ? ((PubSubConfiguration) configuration) : null;
 		if (configuration == null) {
-			logger.error("configuration is not ZeroMqConfiguration");
+			logger.error("configuration is null");
 			return false;
 		}
 		PubSubConfiguration configuration1 = (PubSubConfiguration) configuration;

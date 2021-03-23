@@ -95,7 +95,7 @@ public class Manager implements ManagerInterface {
 				
 				IonBusProvider ionBusProvider = null;
 				
-				logger.info("init: {}.2- Creating with record no empty: {}.", i, record);
+				logger.info("init: {}.1- Creating with record no empty: {}.", i, record);
 				ionBusProvider = new IonBusProvider(currency, source, instrument, record, fields);
 				try {
 					ionBusProvider.initChain();
@@ -103,7 +103,7 @@ public class Manager implements ManagerInterface {
 					logger.error("NullPointerException init initChain ionBusProvider! on {} {} {} {}", currency, source, instrument, record);
 				}
 				prepareSettings(provider, source, type, ionBusProvider);
-				logger.info("init: {}.3- Created bus subscriber for providers {}.", i, provider);
+				logger.info("init: {}.2- Created bus subscriber for providers {}.", i, provider);
 				
 			} catch (Exception e) {
 				logger.error("Error creating provider to {} ", provider, e);
@@ -263,7 +263,7 @@ public class Manager implements ManagerInterface {
 					return;
 				}
 
-				// Send to Google
+				// 1- Send to Google
 				if (sendToGoogle(idBus, timestamp, this.type, this.source, queueConfiguration, messagesSent,
 						completeFields) != 1) {
 					smsNoSent = "idBus(" + idBus + "), timestampSent(" + timestamp + "), type(" + type + "), source("
@@ -272,7 +272,7 @@ public class Manager implements ManagerInterface {
 					logger.debug("The message could not be sent: " + smsNoSent);
 				}
 				
-				// Save price and Qty
+				// 2- Save price and Qty
 				Map<String, TreeMap<Long, ElemtPriceQty>> mapIsinAskBidVwap = mapProviderIsinVwap.get(this.nameProvider);
 				if (mapIsinAskBidVwap == null) {
 					mapIsinAskBidVwap = new HashMap<>();
@@ -482,17 +482,20 @@ public class Manager implements ManagerInterface {
 				logger.info("********************* INIT VWAP ****************************");
 				// private Map<String, Map<String, TreeMap<Long, ElemtPriceQty>>> mapProviderIsinVwap;
 				if (mapProviderIsinVwap!=null) {
+					// for providers
 					for (Entry<String, Map<String, TreeMap<Long, ElemtPriceQty>>> entrySet : mapProviderIsinVwap.entrySet()) {
 						String provider = entrySet.getKey();
 						logger.info("\tProvider --> {} :", provider);
 						
 						Map<String, TreeMap<Long, ElemtPriceQty>> mapIsinVwap = entrySet.getValue();
+						// for isins of provider
 						for (Entry<String, TreeMap<Long, ElemtPriceQty>> entrySetMap : mapIsinVwap.entrySet()) {
 							String isinBidAsk = entrySetMap.getKey();
 							TreeMap<Long, ElemtPriceQty> vwapIsin = entrySetMap.getValue();
 							logger.info("\t\tIsin{} :", isinBidAsk);
 							Double sumQtyPrice = null;
 							Integer acumQty = null;
+							// for ask and bid of isin
 							for (Entry<Long, ElemtPriceQty> entrySetAskBidMap : vwapIsin.entrySet()) {
 								Long timeStamp = entrySetAskBidMap.getKey();
 								ElemtPriceQty elem = entrySetAskBidMap.getValue();
