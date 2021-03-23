@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:util="http://www.springframework.org/schema/util"
+	xmlns:context="http://www.springframework.org/schema/context"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd 
+		http://www.springframework.org/schema/util http://www.springframework.org/schema/util/spring-util.xsd 
+		http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd">
+
+	<context:annotation-config />
+
+	<bean
+		class="org.springframework.beans.factory.config.MethodInvokingFactoryBean">
+		<property name="targetObject">
+			<bean
+				class="org.springframework.beans.factory.config.MethodInvokingFactoryBean">
+				<property name="targetClass" value="java.lang.System" />
+				<property name="targetMethod" value="getProperties" />
+			</bean>
+		</property>
+		<property name="targetMethod" value="putAll" />
+		<property name="arguments">
+			<util:properties>
+				<prop key="log4j.configurationFile">${log4j.configurationFile}</prop>
+				<prop key="log.appName">${mkv.component}</prop>
+				<prop key="log.fileSize">${log.fileSize}</prop>
+				<prop key="log.path">${mkv.logsdir}/LOGS</prop>
+				<prop key="log.level">${log.level}</prop>
+				<prop key="log.output">${log.output}</prop>
+			</util:properties>
+		</property>
+	</bean>
+	
+	<bean id="platformWrapper" class="common.CollectPrices.bus.PlatformWrapperImpl"/>
+
+</beans>
