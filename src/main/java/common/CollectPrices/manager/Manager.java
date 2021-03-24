@@ -58,10 +58,20 @@ public class Manager implements ManagerInterface {
 	@Value("${desk}") 
 	private String desk;
 	
-	protected static final String BID_PRICE_FIELD = "BID_PRICE";
-	protected static final String ASK_PRICE_FIELD = "ASK_PRICE";
-	protected static final String BID_SIZE_FIELD = "BID_SIZE";
-	protected static final String ASK_SIZE_FIELD = "ASK_SIZE";
+	private static final String BID_PRICE_FIELD = "BID_PRICE";
+	private static final String ASK_PRICE_FIELD = "ASK_PRICE";
+	private static final String BID_SIZE_FIELD = "BID_SIZE";
+	private static final String ASK_SIZE_FIELD = "ASK_SIZE";
+	
+	private static final String ASK0 = "Ask0";
+	private static final String _ASK = "_Ask";
+	private static final String ASK_SIZE0 = "AskSize0";
+	
+	private static final String BID0 = "Bid0";
+	private static final String _BID = "_Bid";
+	private static final String BID_SIZE0 = "BidSize0";
+	
+	private static final String SEPARATOR = "_";
 	
 	protected static Gson GSON = new GsonBuilder().setPrettyPrinting().serializeSpecialFloatingPointValues().create();
 	
@@ -229,7 +239,7 @@ public class Manager implements ManagerInterface {
 		return tick;
 	}
 	
-private GenericTick getLegacyOrderBookFields(String topic, String source, GenericTick tick, Map<String, Object> fields) {
+	private GenericTick getLegacyOrderBookFields(String topic, String source, GenericTick tick, Map<String, Object> fields) {
 		
 		tick.setInstrumentId(fields.get("Id").toString());
 		tick.setType("ORDER_BOOK");
@@ -376,7 +386,8 @@ private GenericTick getLegacyOrderBookFields(String topic, String source, Generi
 					logger.debug("The message could not be sent: " + smsNoSent);
 				}
 				
-				// 2- Save price and Qty
+				// 2- Save price and Qty(for 1 isin of 1 provider)
+				// private Map<String, Map<String, TreeMap<Long, ElemtPriceQty>>> mapProviderIsinVwap;
 				Map<String, TreeMap<Long, ElemtPriceQty>> mapIsinAskBidVwap = mapProviderIsinVwap.get(this.nameProvider);
 				if (mapIsinAskBidVwap == null) {
 					mapIsinAskBidVwap = new HashMap<>();
@@ -387,48 +398,52 @@ private GenericTick getLegacyOrderBookFields(String topic, String source, Generi
 
 				} else {
 										
-					TreeMap<Long, ElemtPriceQty> mapIsinAskBidVwapAux = mapIsinAskBidVwap.get(idBus+"_Ask");
+					TreeMap<Long, ElemtPriceQty> mapIsinAskBidVwapAux = mapIsinAskBidVwap.get(idBus+_ASK);
 					if (mapIsinAskBidVwapAux==null) {
 						
 						saveTreeMapAskBid(fields, timestamp, idBus, mapIsinAskBidVwap);
 						
 					} else {
 						// Returns the greatest key less than or equal to the given key,or null if there is no such key
-						Long cutoffTimeAsk = mapIsinAskBidVwap.get(idBus + "_Ask").floorKey(timestamp - timeWindowLength);
+						Long cutoffTimeAsk = mapIsinAskBidVwap.get(idBus + _ASK).floorKey(timestamp - timeWindowLength);
 						if (cutoffTimeAsk != null) {
-							Long firstTime = mapIsinAskBidVwap.get(idBus + "_Ask").firstKey();
+							Long firstTime = mapIsinAskBidVwap.get(idBus + _ASK).firstKey();
 							while (firstTime != cutoffTimeAsk) {
-								mapIsinAskBidVwap.get(idBus + "_Ask").remove(firstTime);
-								firstTime = mapIsinAskBidVwap.get(idBus + "_Ask").firstKey();
+								mapIsinAskBidVwap.get(idBus + _ASK).remove(firstTime);
+								firstTime = mapIsinAskBidVwap.get(idBus + _ASK).firstKey();
 							}
 						}
 						
-						Long cutoffTimeBid = mapIsinAskBidVwap.get(idBus+"_Bid").floorKey(timestamp - timeWindowLength);
+						Long cutoffTimeBid = mapIsinAskBidVwap.get(idBus+_BID).floorKey(timestamp - timeWindowLength);
 						if (cutoffTimeBid != null) {
-							Long firstTime = mapIsinAskBidVwap.get(idBus + "_Bid").firstKey();
+							Long firstTime = mapIsinAskBidVwap.get(idBus + _BID).firstKey();
 							while (firstTime != cutoffTimeBid) {
-								mapIsinAskBidVwap.get(idBus + "_Bid").remove(firstTime);
-								firstTime = mapIsinAskBidVwap.get(idBus + "_Bid").firstKey();
+								mapIsinAskBidVwap.get(idBus + _BID).remove(firstTime);
+								firstTime = mapIsinAskBidVwap.get(idBus + _BID).firstKey();
 							}
 						}
 						
-						mapIsinAskBidVwap.get(idBus+"_Ask").put(timestamp, new ElemtPriceQty((double) fields.get("Ask0"), (int) fields.get("AskSize0")));
-						mapIsinAskBidVwap.get(idBus+"_Bid").put(timestamp, new ElemtPriceQty((double) fields.get("Bid0"), (int) fields.get("BidSize0")));
+						mapIsinAskBidVwap.get(idBus + _ASK).put(timestamp, new ElemtPriceQty((double) fields.get(ASK0), (int) fields.get(ASK_SIZE0)));
+						mapIsinAskBidVwap.get(idBus + _BID).put(timestamp, new ElemtPriceQty((double) fields.get(BID0), (int) fields.get(BID_SIZE0)));
 					}
 				}
+				
+				// Calculete vwap for each change in the bus(provider and isin)				
+				calculateVwapIsin(this.nameProvider, idBus, _ASK, mapProviderIsinVwap.get(this.nameProvider).get(idBus + _ASK));
+				calculateVwapIsin(this.nameProvider, idBus, _BID, mapProviderIsinVwap.get(this.nameProvider).get(idBus + _BID));
 			}
 		}
 
 		private void saveTreeMapAskBid(Map<String, Object> fields, long timestamp, String idBus,
 				Map<String, TreeMap<Long, ElemtPriceQty>> mapIsinAskBidVwap) {
 			TreeMap<Long, ElemtPriceQty> mapTimeAsk = new TreeMap<Long, ElemtPriceQty>();
-			mapTimeAsk.put(timestamp, new ElemtPriceQty((double) fields.get("Ask0"), (int) fields.get("AskSize0")));
+			mapTimeAsk.put(timestamp, new ElemtPriceQty((double) fields.get(ASK0), (int) fields.get(ASK_SIZE0)));
 
 			TreeMap<Long, ElemtPriceQty> mapTimeBid = new TreeMap<Long, ElemtPriceQty>();
-			mapTimeBid.put(timestamp, new ElemtPriceQty((double) fields.get("Bid0"), (int) fields.get("BidSize0")));
+			mapTimeBid.put(timestamp, new ElemtPriceQty((double) fields.get(BID0), (int) fields.get(BID_SIZE0)));
 			
-			mapIsinAskBidVwap.put(idBus+"_Ask", mapTimeAsk);
-			mapIsinAskBidVwap.put(idBus+"_Bid", mapTimeBid);
+			mapIsinAskBidVwap.put(idBus + _ASK, mapTimeAsk);
+			mapIsinAskBidVwap.put(idBus + _BID, mapTimeBid);
 		}
 
 		@Override public void fullUpdate(Map<String, Object> fields) {
@@ -498,7 +513,7 @@ private GenericTick getLegacyOrderBookFields(String topic, String source, Generi
 	}
 	
 	private void calculateVwap() {
-		logger.info("********************* INIT VWAP ****************************");
+		logger.info("********************* INIT VWAP ALL PROVIDERS AND ALL ISINS ****************************");
 		// private Map<String, Map<String, TreeMap<Long, ElemtPriceQty>>> mapProviderIsinVwap;
 		if (mapProviderIsinVwap!=null) {
 			// for providers
@@ -506,37 +521,54 @@ private GenericTick getLegacyOrderBookFields(String topic, String source, Generi
 				String provider = entrySet.getKey();
 				logger.info("\tProvider --> {} :", provider);
 				
-				Map<String, TreeMap<Long, ElemtPriceQty>> mapIsinVwap = entrySet.getValue();
+				Map<String, TreeMap<Long, ElemtPriceQty>> mapIsinAskBidVwap = entrySet.getValue();
+				
 				// for isins of provider
-				for (Entry<String, TreeMap<Long, ElemtPriceQty>> entrySetMap : mapIsinVwap.entrySet()) {
+				for (Entry<String, TreeMap<Long, ElemtPriceQty>> entrySetMap : mapIsinAskBidVwap.entrySet()) {
 					String isinBidAsk = entrySetMap.getKey();
 					TreeMap<Long, ElemtPriceQty> vwapIsin = entrySetMap.getValue();
-					logger.info("\t\tIsin{} :", isinBidAsk);
-					Double sumQtyPrice = null;
-					Integer acumQty = null;
-					// for ask and bid of isin
-					for (Entry<Long, ElemtPriceQty> entrySetAskBidMap : vwapIsin.entrySet()) {
-						Long timeStamp = entrySetAskBidMap.getKey();
-						ElemtPriceQty elem = entrySetAskBidMap.getValue();
-						logger.debug("\t\t\t time{} price{} qty{}.", timeStamp, elem.getPrice(), elem.getQty());
-						// Σ ((qty * precio)) / volumen total.
-						if (sumQtyPrice==null) {
-							sumQtyPrice = elem.getPrice() * elem.getQty();
-							acumQty = elem.getQty();
-						} else {
-							sumQtyPrice = sumQtyPrice + (elem.getPrice() * elem.getQty());
-							acumQty = acumQty + elem.getQty();
-						}
-					}
-					if (sumQtyPrice!=null && acumQty!=null) {
-						logger.info("\t\t\t VWAP {} :", (sumQtyPrice / acumQty));
-					} else {
-						logger.error("\\t\\t\\t Could not calculate VWAP.");
-					}
+					
+					String[] elems = isinBidAsk.split(SEPARATOR);
+					calculateVwapIsin(provider, elems[0], SEPARATOR + elems[1], vwapIsin);
 				}
 			}
 		}
 		
-		logger.info("********************* END VWAP ****************************");
+		logger.info("********************* END VWAP ALL PROVIDERS AND ALL ISINS ****************************");
+	}
+
+	private void calculateVwapIsin(String provider, String isin, String askBid, TreeMap<Long, ElemtPriceQty> treeMapAskBid) {
+		logger.info("********************* INIT VWAP FOR PROVIDER {} AND ISIN {} ****************************", provider, isin);
+		
+		logger.info("\t\tIsin{} ({}):", isin, askBid);
+		if (treeMapAskBid !=null) {
+			Double sumQtyPrice = null;
+			Integer acumQty = null;
+			// for ask and bid of isin
+			for (Entry<Long, ElemtPriceQty> entrySetAskBidMap : treeMapAskBid.entrySet()) {
+				Long timeStamp = entrySetAskBidMap.getKey();
+				ElemtPriceQty elem = entrySetAskBidMap.getValue();
+				logger.debug("\t\t\t time{} price{} qty{}.", timeStamp, elem.getPrice(), elem.getQty());
+				// SUM ((qty * precio)) / volumen total.
+				if (sumQtyPrice==null) {
+					sumQtyPrice = elem.getPrice() * elem.getQty();
+					acumQty = elem.getQty();
+				} else {
+					sumQtyPrice = sumQtyPrice + (elem.getPrice() * elem.getQty());
+					acumQty = acumQty + elem.getQty();
+				}
+			}
+			if (sumQtyPrice!=null && acumQty!=null) {
+				logger.info("\t\t\t VWAP {} :", (sumQtyPrice / acumQty));
+			} else {
+				logger.error("\\t\\t\\t Could not calculate VWAP.");
+			}
+		} else {
+			logger.error("\\t\\t\\t Could not calculate VWAP.");
+		}
+		
+		
+		logger.info("********************* END VWAP FOR PROVIDER {} AND ISIN {} ****************************", provider, isin);
+		
 	}
 }
