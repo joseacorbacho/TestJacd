@@ -41,24 +41,33 @@ public class Manager implements ManagerInterface {
 
 	@Autowired protected QueuePublisher queuePublisher;
 	
-	@Value("${mkv.pubSub.sender.project}") String project;
-	@Value("${mkv.pubSub.sender.type:Topic}") String topic;
-	@Value("${mkv.pubSub.sender.credentialsFile}") String credentialsFile;
+	@Value("${mkv.pubSub.sender.project}") 
+	private String project;
+	@Value("${mkv.pubSub.sender.type:Topic}") 
+	private String topic;
+	@Value("${mkv.pubSub.sender.credentialsFile}") 
+	private String credentialsFile;
 	@Value("${Manager.timeWindowLength:300000}") // 5 min
 	private long timeWindowLength;
 	@Value("${Manager.sleepCycleMs:600000}") // 10 min
 	private long SLEEP_CYCLE_MS;
 
-	
-	@Value("#{'${mkv.providers}'.split(',')}") List<String> providers;
+	@Value("#{'${mkv.providers}'.split(',')}") 
+	private List<String> providers;
 
-	@Value("${desk}") String desk;
+	@Value("${desk}") 
+	private String desk;
 	
-	private ShowVwapThread showVwapThread;
+	protected static final String BID_PRICE_FIELD = "BID_PRICE";
+	protected static final String ASK_PRICE_FIELD = "ASK_PRICE";
+	protected static final String BID_SIZE_FIELD = "BID_SIZE";
+	protected static final String ASK_SIZE_FIELD = "ASK_SIZE";
 	
 	protected static Gson GSON = new GsonBuilder().setPrettyPrinting().serializeSpecialFloatingPointValues().create();
 	
 	private Logger logger = LogManager.getLogger(Manager.class);
+	
+	private ShowVwapThread showVwapThread;
 	
 	private PubSubType pubSubType;
 	
@@ -66,11 +75,6 @@ public class Manager implements ManagerInterface {
 	private Map<String, IonBusProvider> ionBusProvidersMap;
 	private Map<String, QueueConfiguration> configurationsMap;
 	private Map<String, Map<String, TreeMap<Long, ElemtPriceQty>>> mapProviderIsinVwap;
-	
-	protected static final String BID_PRICE_FIELD = "BID_PRICE";
-	protected static final String ASK_PRICE_FIELD = "ASK_PRICE";
-	protected static final String BID_SIZE_FIELD = "BID_SIZE";
-	protected static final String ASK_SIZE_FIELD = "ASK_SIZE";
 
 	
 	@PostConstruct private void init() {
@@ -79,6 +83,7 @@ public class Manager implements ManagerInterface {
 		busRetransmitterMap = new HashMap<>();
 		mapProviderIsinVwap = new ConcurrentHashMap<>();
 		
+		// Thread for vwap calculation
 		this.showVwapThread = new ShowVwapThread();
 		
 		pubSubType = PubSubType.get(topic);
@@ -112,13 +117,76 @@ public class Manager implements ManagerInterface {
 				logger.error("Error creating provider to {} ", provider, e);
 			}
 		}	
+	}
+	
+	private String getPropertyMkv(String provider, String property) {
+		String propertyStr = String.format("mkv.%s.%s", provider, property);
+		logger.debug("getting property {}", propertyStr);
+		String output = properties.get(propertyStr);
+		return output;
+	}
+	
+	private Set<String> getPropertySet(String provider, String property, String separator) {
+		String propertiesStr = getPropertyMkv(provider, property);
+		if (propertiesStr == null) {
+			logger.error("Cant find {} in properties to get list ", property);
+			return null;
+		}
+		if (!propertiesStr.isEmpty()) {
+			List<String> result = Arrays.asList(propertiesStr.split(separator));
+			return new HashSet<>(result);
+		}
+		return new HashSet<>();
+	}
+	
+	private void prepareSettings(String provider, String source, String type, IonBusProvider ionBusProvider)
+			throws Exception {
 		
+		String typeMessage = getPropertyMkv(provider, "type");
+
+		QueueConfiguration pubSubConfiguration = obtainQueueConfiguration(provider, typeMessage);
+		
+		BusRetransmitter busRetransmitter = busRetransmitterMap.get(provider);
+		if (busRetransmitter == null) {
+			busRetransmitter = new BusRetransmitter(provider, source, type, pubSubConfiguration);
+			busRetransmitterMap.put(provider, busRetransmitter);
+		}
+		ionBusProvider.addObserver(busRetransmitter);
+		ionBusProvidersMap.put(provider + ionBusProvider.getRecord(), ionBusProvider);
+		
+	}
+	
+	public QueueConfiguration obtainQueueConfiguration(String provider, String typeMessage)  throws Exception {
+		
+		String topic = getPropertyMkv(provider, "topic");
+		QueueConfiguration pubSubConfiguration = getQueueConfiguration(topic);
+		if (pubSubConfiguration == null) {
+			pubSubConfiguration = createQueueConfiguration(topic, typeMessage);
+			configurationsMap.put(topic,pubSubConfiguration);
+		}
+		return pubSubConfiguration;
+	}
+	
+	public QueueConfiguration getQueueConfiguration(String topic) {
+		return configurationsMap.get(topic);
+	}
+	
+	private QueueConfiguration createQueueConfiguration(String topic, String typeMessage) throws Exception {
+
+		if (queuePublisher instanceof common.CollectPrices.publisher.PubSubMessagePublisher) {
+			PubSubConfiguration pubSubConfiguration = new PubSubConfiguration(credentialsFile, topic, "subscriptionId", project, pubSubType);
+			return pubSubConfiguration;
+		} else {
+			logger.error("Cant get configuration of class {}", queuePublisher);
+			throw new Exception("Cant get configuration of class " + queuePublisher);
+		}
 	}
 
 
 	@Override
 	public Integer sendToGoogle(String idBus, long timestamp, String type, String source,
 			QueueConfiguration queueConfiguration, AtomicInteger messagesSent, Map<String, Object> completeFields) {
+		
 		GenericTick messageComplete = wrapFields(type, source, completeFields, timestamp);
 		if (messageComplete == null) {
 			return 0;
@@ -161,67 +229,100 @@ public class Manager implements ManagerInterface {
 		return tick;
 	}
 	
-	private String getPropertyMkv(String provider, String property) {
-		String propertyStr = String.format("mkv.%s.%s", provider, property);
-		logger.debug("getting property {}", propertyStr);
-		String output = properties.get(propertyStr);
-		return output;
-	}
-	
-	private Set<String> getPropertySet(String provider, String property, String separator) {
-		String propertiesStr = getPropertyMkv(provider, property);
-		if (propertiesStr == null) {
-			logger.error("Cant find {} in properties to get list ", property);
-			return null;
-		}
-		if (!propertiesStr.isEmpty()) {
-			List<String> result = Arrays.asList(propertiesStr.split(separator));
-			return new HashSet<>(result);
-		}
-		return new HashSet<>();
-	}
-	
-	private void prepareSettings(String provider, String source, String type, IonBusProvider ionBusProvider)
-			throws Exception {
+private GenericTick getLegacyOrderBookFields(String topic, String source, GenericTick tick, Map<String, Object> fields) {
 		
-		String typeMessage = getPropertyMkv(provider, "type");
+		tick.setInstrumentId(fields.get("Id").toString());
+		tick.setType("ORDER_BOOK");
+		boolean status = false;
+		for (String keyField : fields.keySet()) {
+			if (keyField.matches("Ask[0-9]*$")) {
+				//Ask level
+				double value = (double) fields.get(keyField);
+				String level = keyField.replaceFirst(".*?(\\d+).*", "$1");
+				String newKey = ASK_PRICE_FIELD + level;
+				tick.addValue(newKey, value);
+				if (Integer.valueOf(level) == 0 && value != 0) {
+					status = true;
+				}
+			}
+			if (keyField.equals(ASK_PRICE_FIELD) || keyField.equals("O_Ask")) {
+				//Ask level
+				double value = (double) fields.get(keyField);
+				String level = "0";
+				String newKey = ASK_PRICE_FIELD + level;
+				tick.addValue(newKey, value);
+				if (Integer.valueOf(level) == 0 && value != 0) {
+					status = true;
+				}
+			}
+			if (keyField.matches("Bid[0-9]*$")) {
+				//Bid level
+				double value = (double) fields.get(keyField);
+				String level = keyField.replaceFirst(".*?(\\d+).*", "$1");
+				String newKey = BID_PRICE_FIELD + level;
+				tick.addValue(newKey, value);
+				if (Integer.valueOf(level) == 0 && value != 0) {
+					status = true;
+				}
+			}
+			if (keyField.equals(BID_PRICE_FIELD) || keyField.equals("O_Bid")) {
+				//Bid level
+				double value = (double) fields.get(keyField);
+				String level = "0";
+				String newKey = BID_PRICE_FIELD + level;
+				tick.addValue(newKey, value);
+				if (Integer.valueOf(level) == 0 && value != 0) {
+					status = true;
+				}
+			}
+			if (keyField.matches("AskSize[0-9]*$")) {
+				//AskSize level
+				double value = (double) fields.get(keyField);
+				String level = keyField.replaceFirst(".*?(\\d+).*", "$1");
+				String newKey = ASK_SIZE_FIELD + level;
+				tick.addValue(newKey, value);
+				if (Integer.valueOf(level) == 0 && value != 0) {
+					status = true;
+				}
+			}
+			if (keyField.equals(ASK_SIZE_FIELD) || keyField.equals("O_AskQty")) {
+				//AskSize level
+				double value = (double) fields.get(keyField);
+				String level = "0";
+				String newKey = ASK_SIZE_FIELD + level;
+				tick.addValue(newKey, value);
+				if (Integer.valueOf(level) == 0 && value != 0) {
+					status = true;
+				}
+			}
+			if (keyField.matches("BidSize[0-9]*$")) {
+				//BidSize level
+				double value = (double) fields.get(keyField);
+				String level = keyField.replaceFirst(".*?(\\d+).*", "$1");
+				String newKey = BID_SIZE_FIELD + level;
+				tick.addValue(newKey, value);
+				if (Integer.valueOf(level) == 0 && value != 0) {
+					status = true;
+				}
 
-		QueueConfiguration pubSubConfiguration = obtainQueueConfiguration(provider, typeMessage);
+			}
+			if (keyField.equals(BID_SIZE_FIELD) || keyField.equals("O_BidQty")) {
+				//BidSize level
+				double value = (double) fields.get(keyField);
+				String level = "0";
+				String newKey = BID_SIZE_FIELD + level;
+				tick.addValue(newKey, value);
+				if (Integer.valueOf(level) == 0 && value != 0) {
+					status = true;
+				}
+			}
+
+		}
 		
-		BusRetransmitter busRetransmitter = busRetransmitterMap.get(provider);
-		if (busRetransmitter == null) {
-			busRetransmitter = new BusRetransmitter(provider, source, type, pubSubConfiguration);
-			busRetransmitterMap.put(provider, busRetransmitter);
+		if (!status) {
+			tick.setInvalidStatus();
 		}
-		ionBusProvider.addObserver(busRetransmitter);
-		ionBusProvidersMap.put(provider + ionBusProvider.getRecord(), ionBusProvider);
-		
-	}
-	
-	public QueueConfiguration obtainQueueConfiguration(String provider, String typeMessage)  throws Exception {
-		String topic = getPropertyMkv(provider, "topic");
-		QueueConfiguration pubSubConfiguration = getQueueConfiguration(topic);
-		if (pubSubConfiguration == null) {
-			pubSubConfiguration = createQueueConfiguration(topic, typeMessage);
-			configurationsMap.put(topic,pubSubConfiguration);
-		}
-		return pubSubConfiguration;
-	}
-	
-	public QueueConfiguration getQueueConfiguration(String topic) {
-		return configurationsMap.get(topic);
-	}
-	
-	private QueueConfiguration createQueueConfiguration(String topic, String typeMessage) throws Exception {
-
-		if (queuePublisher instanceof common.CollectPrices.publisher.PubSubMessagePublisher) {
-			PubSubConfiguration pubSubConfiguration = new PubSubConfiguration(credentialsFile, topic, "subscriptionId", project, pubSubType);
-			return pubSubConfiguration;
-		} else {
-			logger.error("Cant get configuration of class {}", queuePublisher);
-			throw new Exception("Cant get configuration of class " + queuePublisher);
-		}
-
+		return tick;
 	}
 	
 	public class BusRetransmitter implements BusObserver {
@@ -373,102 +474,6 @@ public class Manager implements ManagerInterface {
 		}
 	}
 	
-	private GenericTick getLegacyOrderBookFields(String topic, String source, GenericTick tick, Map<String, Object> fields) {
-		
-		tick.setInstrumentId(fields.get("Id").toString());
-		tick.setType("ORDER_BOOK");
-		boolean status = false;
-		for (String keyField : fields.keySet()) {
-			if (keyField.matches("Ask[0-9]*$")) {
-				//Ask level
-				double value = (double) fields.get(keyField);
-				String level = keyField.replaceFirst(".*?(\\d+).*", "$1");
-				String newKey = ASK_PRICE_FIELD + level;
-				tick.addValue(newKey, value);
-				if (Integer.valueOf(level) == 0 && value != 0) {
-					status = true;
-				}
-			}
-			if (keyField.equals(ASK_PRICE_FIELD) || keyField.equals("O_Ask")) {
-				//Ask level
-				double value = (double) fields.get(keyField);
-				String level = "0";
-				String newKey = ASK_PRICE_FIELD + level;
-				tick.addValue(newKey, value);
-				if (Integer.valueOf(level) == 0 && value != 0) {
-					status = true;
-				}
-			}
-			if (keyField.matches("Bid[0-9]*$")) {
-				//Bid level
-				double value = (double) fields.get(keyField);
-				String level = keyField.replaceFirst(".*?(\\d+).*", "$1");
-				String newKey = BID_PRICE_FIELD + level;
-				tick.addValue(newKey, value);
-				if (Integer.valueOf(level) == 0 && value != 0) {
-					status = true;
-				}
-			}
-			if (keyField.equals(BID_PRICE_FIELD) || keyField.equals("O_Bid")) {
-				//Bid level
-				double value = (double) fields.get(keyField);
-				String level = "0";
-				String newKey = BID_PRICE_FIELD + level;
-				tick.addValue(newKey, value);
-				if (Integer.valueOf(level) == 0 && value != 0) {
-					status = true;
-				}
-			}
-			if (keyField.matches("AskSize[0-9]*$")) {
-				//AskSize level
-				double value = (double) fields.get(keyField);
-				String level = keyField.replaceFirst(".*?(\\d+).*", "$1");
-				String newKey = ASK_SIZE_FIELD + level;
-				tick.addValue(newKey, value);
-				if (Integer.valueOf(level) == 0 && value != 0) {
-					status = true;
-				}
-			}
-			if (keyField.equals(ASK_SIZE_FIELD) || keyField.equals("O_AskQty")) {
-				//AskSize level
-				double value = (double) fields.get(keyField);
-				String level = "0";
-				String newKey = ASK_SIZE_FIELD + level;
-				tick.addValue(newKey, value);
-				if (Integer.valueOf(level) == 0 && value != 0) {
-					status = true;
-				}
-			}
-			if (keyField.matches("BidSize[0-9]*$")) {
-				//BidSize level
-				double value = (double) fields.get(keyField);
-				String level = keyField.replaceFirst(".*?(\\d+).*", "$1");
-				String newKey = BID_SIZE_FIELD + level;
-				tick.addValue(newKey, value);
-				if (Integer.valueOf(level) == 0 && value != 0) {
-					status = true;
-				}
-
-			}
-			if (keyField.equals(BID_SIZE_FIELD) || keyField.equals("O_BidQty")) {
-				//BidSize level
-				double value = (double) fields.get(keyField);
-				String level = "0";
-				String newKey = BID_SIZE_FIELD + level;
-				tick.addValue(newKey, value);
-				if (Integer.valueOf(level) == 0 && value != 0) {
-					status = true;
-				}
-			}
-
-		}
-		
-		if (!status) {
-			tick.setInvalidStatus();
-		}
-		return tick;
-	}
-	
 	private class ShowVwapThread implements Runnable {
 
 		private boolean start = false;
@@ -480,57 +485,58 @@ public class Manager implements ManagerInterface {
 		public void run() {
 			while (this.start) {
 				
-				logger.info("********************* INIT VWAP ****************************");
-				// private Map<String, Map<String, TreeMap<Long, ElemtPriceQty>>> mapProviderIsinVwap;
-				if (mapProviderIsinVwap!=null) {
-					// for providers
-					for (Entry<String, Map<String, TreeMap<Long, ElemtPriceQty>>> entrySet : mapProviderIsinVwap.entrySet()) {
-						String provider = entrySet.getKey();
-						logger.info("\tProvider --> {} :", provider);
-						
-						Map<String, TreeMap<Long, ElemtPriceQty>> mapIsinVwap = entrySet.getValue();
-						// for isins of provider
-						for (Entry<String, TreeMap<Long, ElemtPriceQty>> entrySetMap : mapIsinVwap.entrySet()) {
-							String isinBidAsk = entrySetMap.getKey();
-							TreeMap<Long, ElemtPriceQty> vwapIsin = entrySetMap.getValue();
-							logger.info("\t\tIsin{} :", isinBidAsk);
-							Double sumQtyPrice = null;
-							Integer acumQty = null;
-							// for ask and bid of isin
-							for (Entry<Long, ElemtPriceQty> entrySetAskBidMap : vwapIsin.entrySet()) {
-								Long timeStamp = entrySetAskBidMap.getKey();
-								ElemtPriceQty elem = entrySetAskBidMap.getValue();
-								logger.debug("\t\t\t time{} price{} qty{}.", timeStamp, elem.getPrice(), elem.getQty());
-								// Σ ((qty * precio)) / volumen total.
-								if (sumQtyPrice==null) {
-									sumQtyPrice = elem.getPrice() * elem.getQty();
-									acumQty = elem.getQty();
-								} else {
-									sumQtyPrice = sumQtyPrice + (elem.getPrice() * elem.getQty());
-									acumQty = acumQty + elem.getQty();
-								}
-							}
-							if (sumQtyPrice!=null && acumQty!=null) {
-								logger.info("\t\t\t VWAP {} :", (sumQtyPrice / acumQty));
-							} else {
-								logger.error("\\t\\t\\t Could not calculate VWAP.");
-							}
-						}
-					}
-				}
-				
-				logger.info("********************* END VWAP ****************************");
+				calculateVwap();
 				
 				// sleep
 				try {
 					Thread.sleep(SLEEP_CYCLE_MS);
 				} catch (InterruptedException e) {
-					logger.error("ShowVwapThread --> run(): error sleeping in ShowVwapThread ", e);
+					logger.error("Error sleeping in calculateVwap ", e);
 				}
-			}
-			
+			}	
 		}
-		
 	}
 	
+	private void calculateVwap() {
+		logger.info("********************* INIT VWAP ****************************");
+		// private Map<String, Map<String, TreeMap<Long, ElemtPriceQty>>> mapProviderIsinVwap;
+		if (mapProviderIsinVwap!=null) {
+			// for providers
+			for (Entry<String, Map<String, TreeMap<Long, ElemtPriceQty>>> entrySet : mapProviderIsinVwap.entrySet()) {
+				String provider = entrySet.getKey();
+				logger.info("\tProvider --> {} :", provider);
+				
+				Map<String, TreeMap<Long, ElemtPriceQty>> mapIsinVwap = entrySet.getValue();
+				// for isins of provider
+				for (Entry<String, TreeMap<Long, ElemtPriceQty>> entrySetMap : mapIsinVwap.entrySet()) {
+					String isinBidAsk = entrySetMap.getKey();
+					TreeMap<Long, ElemtPriceQty> vwapIsin = entrySetMap.getValue();
+					logger.info("\t\tIsin{} :", isinBidAsk);
+					Double sumQtyPrice = null;
+					Integer acumQty = null;
+					// for ask and bid of isin
+					for (Entry<Long, ElemtPriceQty> entrySetAskBidMap : vwapIsin.entrySet()) {
+						Long timeStamp = entrySetAskBidMap.getKey();
+						ElemtPriceQty elem = entrySetAskBidMap.getValue();
+						logger.debug("\t\t\t time{} price{} qty{}.", timeStamp, elem.getPrice(), elem.getQty());
+						// Σ ((qty * precio)) / volumen total.
+						if (sumQtyPrice==null) {
+							sumQtyPrice = elem.getPrice() * elem.getQty();
+							acumQty = elem.getQty();
+						} else {
+							sumQtyPrice = sumQtyPrice + (elem.getPrice() * elem.getQty());
+							acumQty = acumQty + elem.getQty();
+						}
+					}
+					if (sumQtyPrice!=null && acumQty!=null) {
+						logger.info("\t\t\t VWAP {} :", (sumQtyPrice / acumQty));
+					} else {
+						logger.error("\\t\\t\\t Could not calculate VWAP.");
+					}
+				}
+			}
+		}
+		
+		logger.info("********************* END VWAP ****************************");
+	}
 }
