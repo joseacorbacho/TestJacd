@@ -4,6 +4,16 @@
        xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd http://www.springframework.org/schema/util http://www.springframework.org/schema/util/spring-util.xsd">
 
     <import resource="env-config.xml"/>
-    <import resource="../google-tick-config.xml"/>
 
+    <bean id="propertyPlaceholderExposer" class="common.CollectPrices.bus.PropertyPlaceholderExposer">
+    </bean>
+
+    <bean id="manager" class="common.CollectPrices.manager.Manager">
+    </bean>
+
+    <util:set id="mkvPublishListeners">
+    </util:set>
+
+    <util:set id="mkvTransactionListeners">
+    </util:set>
 </beans>
