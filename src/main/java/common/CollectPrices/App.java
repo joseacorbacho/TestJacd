@@ -1,12 +1,10 @@
 package common.CollectPrices;
 
-import java.io.PrintStream;
 import java.lang.management.ManagementFactory;
 import java.util.Arrays;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.springframework.beans.BeansException;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.support.ClassPathXmlApplicationContext;
 

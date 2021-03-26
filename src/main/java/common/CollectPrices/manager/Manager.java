@@ -34,6 +34,15 @@ import common.CollectPrices.spring.PropertyPlaceholderExposer;
 import common.CollectPrices.tick.GenericTick;
 import common.CollectPrices.tick.SourceTick;
 
+/**
+ * Clase Manager principal encarga de la gestion de:
+ * 	- Subcribirse al bus de ION(a la informacion definidaen los properties) para recoger la info de precios y qtys.
+ *  - Guardar la informacion en una estructura de datos.
+ *  - Calcular Vwap para cad instrumento en tiempo Real.
+ *  
+ * @author Jose
+ *
+ */
 
 public class Manager {
 	
